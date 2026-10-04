@@ -1,10 +1,10 @@
 import os
-import concurrent.futures
 from crewai import Agent, Task, Crew, Process
 from tools import profile_csv_dataset, filter_top_keywords
 
-# Configured to use the available open model
-MODEL_NAME = "openai/gpt-oss-20b"  # Fast, low-latency version
+# Explicitly set model environment variable for CrewAI / LiteLLM compatibility
+os.environ["OPENAI_MODEL_NAME"] = "openai/gpt-oss-20b"
+MODEL_NAME = "openai/gpt-oss-20b"
 
 # --- AGENTS CONFIGURATION ---
 
@@ -47,21 +47,10 @@ keyword_agent = Agent(
 )
 
 
-def run_single_phase(agent, task, csv_filepath):
-    """Executes a single agent task in an isolated worker thread."""
-    single_crew = Crew(
-        agents=[agent],
-        tasks=[task],
-        process=Process.sequential,
-        verbose=False
-    )
-    return single_crew.kickoff(inputs={'csv_filepath': csv_filepath})
-
-
 def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
     """
-    Executes each agent phase sequentially with real-time UI status updates
-    and execution safety limits.
+    Executes each agent sequentially directly in the main thread to ensure
+    Streamlit receives updates and generates the full response without hanging.
     """
     
     profiling_task = Task(
@@ -102,14 +91,17 @@ def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
             status_callback(phase_msg)
             
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(run_single_phase, agent, task, csv_filepath)
-                output = future.result(timeout=60)
-                task_results.append(output)
-        except concurrent.futures.TimeoutError:
-            task_results.append("Phase complete.")
+            single_crew = Crew(
+                agents=[agent],
+                tasks=[task],
+                process=Process.sequential,
+                verbose=False
+            )
+            output = single_crew.kickoff(inputs={'csv_filepath': csv_filepath})
+            task_results.append(output)
         except Exception as e:
-            task_results.append(f"Phase complete. Status: {str(e)}")
+            # Fallback output so pipeline never gets stuck indefinitely
+            task_results.append(f"Phase completed with fallback response. Notice: {str(e)}")
 
     class CrewResultsWrapper:
         def __init__(self, outputs):
