@@ -165,12 +165,14 @@ if navigation == "📊 Dashboard & Upload":
         if st.button("⚡ Execute Multi-Agent Analysis Pipeline", use_container_width=True):
             status_box = st.status("🤖 Multi-Agent Workflow Initiated...", expanded=True)
             
+            # Callback function to update UI for each phase
             def update_status(msg):
                 status_box.write(msg)
                 
             try:
+                # Pass update_status callback to update UI step-by-step
                 results = run_autoinsight_pipeline(temp_csv_path, status_callback=update_status)
-                status_box.update(label="✅ Analysis Completed Successfully!", state="complete")
+                status_box.update(label="✅ All 4 Multi-Agent Phases Completed Successfully!", state="complete")
                 
                 # Extract results
                 tasks_outputs = results.tasks_output
