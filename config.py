@@ -10,7 +10,6 @@ def get_groq_llm():
         st.error("Missing Groq API Key! Please configure GROQ_API_KEY in Streamlit Secrets.")
         st.stop()
         
-    # Return CrewAI native LLM instance configured for Groq
     return LLM(
         model="groq/openai/gpt-oss-120b",
         api_key=api_key,
