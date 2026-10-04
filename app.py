@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import os
+import plotly.express as px
+import plotly.graph_objects as go
 
 from database import init_db, register_user, authenticate_user, save_analysis, get_user_history
 from main_crew import run_autoinsight_pipeline
@@ -67,6 +69,23 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# Helper function to clean formatted strings for visualization engines
+def get_clean_df(filepath):
+    df = pd.read_csv(filepath)
+    df_clean = df.copy()
+    for col in df_clean.columns:
+        if df_clean[col].dtype == 'object':
+            cleaned = (
+                df_clean[col]
+                .astype(str)
+                .str.replace(r'[$,%>\s]', '', regex=True)
+                .str.replace(',', '', regex=False)
+            )
+            converted = pd.to_numeric(cleaned, errors='coerce')
+            if converted.notnull().sum() > 0.3 * len(df_clean):
+                df_clean[col] = converted.fillna(0)
+    return df_clean
 
 # Session state initialization
 if 'logged_in' not in st.session_state:
@@ -141,6 +160,7 @@ if navigation == "📊 Dashboard & Upload":
         
         temp_csv_path = f"temp_{st.session_state.user_email.replace('@','_')}.csv"
         df.to_csv(temp_csv_path, index=False)
+        st.session_state['active_csv_path'] = temp_csv_path
         
         if st.button("⚡ Execute Multi-Agent Analysis Pipeline", use_container_width=True):
             status_box = st.status("🤖 Multi-Agent Workflow Initiated...", expanded=True)
@@ -180,9 +200,27 @@ if navigation == "📊 Dashboard & Upload":
             except Exception as e:
                 st.error(f"Error during agent pipeline run: {str(e)}")
 
-# --- TAB 2: ML INSIGHTS ---
+# --- TAB 2: ML INSIGHTS & CLUSTERING ---
 elif navigation == "🤖 ML Insights & Clustering":
-    st.subheader("Data Profiling & ML Insights Agent Output")
+    st.subheader("Data Profiling & ML Insights Engine")
+    
+    if 'active_csv_path' in st.session_state and os.path.exists(st.session_state['active_csv_path']):
+        try:
+            df_clean = get_clean_df(st.session_state['active_csv_path'])
+            numeric_cols = df_clean.select_dtypes(include=['float64', 'int64']).columns
+            
+            if len(numeric_cols) > 1:
+                st.markdown("#### Feature Correlation Heatmap")
+                corr = df_clean[numeric_cols].corr()
+                fig_corr = px.imshow(
+                    corr, text_auto=True, color_continuous_scale='Purples',
+                    title="Correlation Matrix across Quantitative Attributes"
+                )
+                fig_corr.update_layout(paper_bgcolor='#120c1f', plot_bgcolor='#120c1f', font_color='#ffb703')
+                st.plotly_chart(fig_corr, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not render feature correlation heatmap: {e}")
+
     if 'latest_results' in st.session_state:
         st.markdown(st.session_state['latest_results']['profiling'])
     else:
@@ -190,7 +228,28 @@ elif navigation == "🤖 ML Insights & Clustering":
 
 # --- TAB 3: PREDICTIVE FORECASTING ---
 elif navigation == "📈 Predictive Forecasting":
-    st.subheader("Forecasting & Trend Agent Output")
+    st.subheader("Forecasting & Trend Analysis Engine")
+    
+    if 'active_csv_path' in st.session_state and os.path.exists(st.session_state['active_csv_path']):
+        try:
+            df_clean = get_clean_df(st.session_state['active_csv_path'])
+            sv_col = next((c for c in df_clean.columns if 'search volume' in c.lower() and 'trend' not in c.lower()), None)
+            kw_col = next((c for c in df_clean.columns if 'keyword' in c.lower()), df_clean.columns[0])
+            
+            if sv_col:
+                st.markdown("#### Top 10 High-Demand Search Terms")
+                top_terms = df_clean.sort_values(by=sv_col, ascending=False).head(10)
+                fig_bar = px.bar(
+                    top_terms, x=kw_col, y=sv_col,
+                    color=sv_col,
+                    color_continuous_scale=['#7b2cbf', '#ffb703'],
+                    title="Search Volume Ranking Distribution"
+                )
+                fig_bar.update_layout(paper_bgcolor='#120c1f', plot_bgcolor='#120c1f', font_color='#e2d9f3')
+                st.plotly_chart(fig_bar, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not render forecasting charts: {e}")
+
     if 'latest_results' in st.session_state:
         st.markdown(st.session_state['latest_results']['forecast'])
     else:
@@ -198,7 +257,28 @@ elif navigation == "📈 Predictive Forecasting":
 
 # --- TAB 4: BUSINESS REPORTS ---
 elif navigation == "📝 Business Reports":
-    st.subheader("Executive Business Report")
+    st.subheader("Executive Business Report & Key Visualizations")
+    
+    if 'active_csv_path' in st.session_state and os.path.exists(st.session_state['active_csv_path']):
+        try:
+            df_clean = get_clean_df(st.session_state['active_csv_path'])
+            sales_col = next((c for c in df_clean.columns if 'sales' in c.lower()), None)
+            kw_col = next((c for c in df_clean.columns if 'keyword' in c.lower()), df_clean.columns[0])
+            
+            if sales_col:
+                st.markdown("#### Key Revenue Drivers")
+                top_sales = df_clean.sort_values(by=sales_col, ascending=False).head(8)
+                fig_sales = px.pie(
+                    top_sales, names=kw_col, values=sales_col,
+                    hole=0.4,
+                    title="Revenue Contribution by Top Keyword Categories",
+                    color_discrete_sequence=px.colors.sequential.Plasma
+                )
+                fig_sales.update_layout(paper_bgcolor='#120c1f', plot_bgcolor='#120c1f', font_color='#ffb703')
+                st.plotly_chart(fig_sales, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not render report charts: {e}")
+
     if 'latest_results' in st.session_state:
         st.markdown(st.session_state['latest_results']['report'])
     else:
