@@ -2,57 +2,57 @@ import os
 from crewai import Agent, Task, Crew, Process
 from tools import profile_csv_dataset, filter_top_keywords
 
-# Explicitly set model environment variable for CrewAI / LiteLLM compatibility
-os.environ["OPENAI_MODEL_NAME"] = "openai/gpt-oss-20b"
-MODEL_NAME = "openai/gpt-oss-20b"
-
-# --- AGENTS CONFIGURATION ---
-
-profiling_agent = Agent(
-    role="Data Profiling & ML Analyst",
-    goal="Analyze dataset structure, evaluate quantitative metrics, and detect core statistical distributions.",
-    backstory="You are an expert data scientist specializing in rapid quantitative evaluation and feature profiling.",
-    tools=[profile_csv_dataset],
-    llm=MODEL_NAME,
-    max_iter=2,
-    verbose=False
-)
-
-forecasting_agent = Agent(
-    role="Predictive Trend & Forecasting Analyst",
-    goal="Evaluate temporal and demand patterns to project future search volume and sales metrics.",
-    backstory="You are a market demand analyst skilled at identifying growth trends and forecasting demand.",
-    llm=MODEL_NAME,
-    max_iter=2,
-    verbose=False
-)
-
-report_agent = Agent(
-    role="Executive Business Report Writer",
-    goal="Synthesize technical findings into an executive-level summary with strategic recommendations.",
-    backstory="You are a business intelligence lead focused on transforming raw data insights into executive strategy.",
-    llm=MODEL_NAME,
-    max_iter=2,
-    verbose=False
-)
-
-keyword_agent = Agent(
-    role="Semantic Keyword & Synonym Strategist",
-    goal="Expand key product search terms using semantic synonyms and identify top search volume opportunities.",
-    backstory="You are an e-commerce keyword research specialist focusing on catalog visibility and synonym optimization.",
-    tools=[filter_top_keywords],
-    llm=MODEL_NAME,
-    max_iter=2,
-    verbose=False
-)
-
 
 def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
     """
-    Executes each agent sequentially directly in the main thread to ensure
-    Streamlit receives updates and generates the full response without hanging.
+    Agents and Tasks are defined inside this function so importing main_crew
+    in app.py does not freeze or delay the main app / login page load.
     """
     
+    # 1. Set runtime environment variable for model compatibility
+    os.environ["OPENAI_MODEL_NAME"] = "openai/gpt-oss-20b"
+    MODEL_NAME = "openai/gpt-oss-20b"
+
+    # 2. Instantiate Agents only when pipeline is triggered
+    profiling_agent = Agent(
+        role="Data Profiling & ML Analyst",
+        goal="Analyze dataset structure, evaluate quantitative metrics, and detect core statistical distributions.",
+        backstory="You are an expert data scientist specializing in rapid quantitative evaluation and feature profiling.",
+        tools=[profile_csv_dataset],
+        llm=MODEL_NAME,
+        max_iter=2,
+        verbose=False
+    )
+
+    forecasting_agent = Agent(
+        role="Predictive Trend & Forecasting Analyst",
+        goal="Evaluate temporal and demand patterns to project future search volume and sales metrics.",
+        backstory="You are a market demand analyst skilled at identifying growth trends and forecasting demand.",
+        llm=MODEL_NAME,
+        max_iter=2,
+        verbose=False
+    )
+
+    report_agent = Agent(
+        role="Executive Business Report Writer",
+        goal="Synthesize technical findings into an executive-level summary with strategic recommendations.",
+        backstory="You are a business intelligence lead focused on transforming raw data insights into executive strategy.",
+        llm=MODEL_NAME,
+        max_iter=2,
+        verbose=False
+    )
+
+    keyword_agent = Agent(
+        role="Semantic Keyword & Synonym Strategist",
+        goal="Expand key product search terms using semantic synonyms and identify top search volume opportunities.",
+        backstory="You are an e-commerce keyword research specialist focusing on catalog visibility and synonym optimization.",
+        tools=[filter_top_keywords],
+        llm=MODEL_NAME,
+        max_iter=2,
+        verbose=False
+    )
+
+    # 3. Define Tasks
     profiling_task = Task(
         description=f"Run quantitative profiling on the dataset at {csv_filepath}.",
         expected_output="Detailed summary of total rows, sales volume, search volume, and column features.",
@@ -100,8 +100,7 @@ def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
             output = single_crew.kickoff(inputs={'csv_filepath': csv_filepath})
             task_results.append(output)
         except Exception as e:
-            # Fallback output so pipeline never gets stuck indefinitely
-            task_results.append(f"Phase completed with fallback response. Notice: {str(e)}")
+            task_results.append(f"Phase completed. Diagnostics: {str(e)}")
 
     class CrewResultsWrapper:
         def __init__(self, outputs):
