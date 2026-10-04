@@ -1,31 +1,22 @@
 import os
 import streamlit as st
 
-# 1. Force secrets into os.environ BEFORE importing CrewAI / LiteLLM
-if "OPENAI_API_KEY" in st.secrets:
-    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
-elif "GROQ_API_KEY" in st.secrets:
+# 1. Map Groq API key directly from Streamlit Secrets to environment variables
+if "GROQ_API_KEY" in st.secrets:
     os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
-    # Fallback dummy to stop LiteLLM standard provider check from throwing errors
-    if "OPENAI_API_KEY" not in os.environ:
-        os.environ["OPENAI_API_KEY"] = "NA"
 
-# 2. Prevent infinite LiteLLM retries and background network logs
+# Dummy fallback so LiteLLM doesn't complain about missing OpenAI credentials
+os.environ["OPENAI_API_KEY"] = os.environ.get("GROQ_API_KEY", "NA")
+
+# Disable LiteLLM logging noise & telemetry
 os.environ["LITELLM_LOG"] = "ERROR"
 os.environ["OTEL_SDK_DISABLED"] = "true"
 
-from crewai import Agent, Task, Crew, Process, LLM
+from crewai import Agent, Task, Crew, Process
 from tools import profile_csv_dataset, filter_top_keywords
 
-# 3. Explicitly construct the LLM object with strict retry limits
-# Choose your active API key and model prefix
-api_key_val = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY"))
-
-custom_llm = LLM(
-    model="openai/gpt-oss-20b",
-    api_key=api_key_val,
-    max_retries=1  # Immediately stops infinite hanging loops
-)
+# Explicitly prefix with 'groq/' so LiteLLM routes to Groq servers
+MODEL_NAME = "groq/openai/gpt-oss-20b"
 
 
 def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
@@ -39,7 +30,7 @@ def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
         goal="Analyze dataset structure, evaluate quantitative metrics, and detect core statistical distributions.",
         backstory="You are an expert data scientist specializing in rapid quantitative evaluation and feature profiling.",
         tools=[profile_csv_dataset],
-        llm=custom_llm,
+        llm=MODEL_NAME,
         max_iter=2,
         verbose=False
     )
@@ -48,7 +39,7 @@ def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
         role="Predictive Trend & Forecasting Analyst",
         goal="Evaluate temporal and demand patterns to project future search volume and sales metrics.",
         backstory="You are a market demand analyst skilled at identifying growth trends and forecasting demand.",
-        llm=custom_llm,
+        llm=MODEL_NAME,
         max_iter=2,
         verbose=False
     )
@@ -57,7 +48,7 @@ def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
         role="Executive Business Report Writer",
         goal="Synthesize technical findings into an executive-level summary with strategic recommendations.",
         backstory="You are a business intelligence lead focused on transforming raw data insights into executive strategy.",
-        llm=custom_llm,
+        llm=MODEL_NAME,
         max_iter=2,
         verbose=False
     )
@@ -67,7 +58,7 @@ def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
         goal="Expand key product search terms using semantic synonyms and identify top search volume opportunities.",
         backstory="You are an e-commerce keyword research specialist focusing on catalog visibility and synonym optimization.",
         tools=[filter_top_keywords],
-        llm=custom_llm,
+        llm=MODEL_NAME,
         max_iter=2,
         verbose=False
     )
@@ -119,8 +110,7 @@ def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
             output = single_crew.kickoff(inputs={'csv_filepath': csv_filepath})
             task_results.append(output)
         except Exception as e:
-            # Catch errors gracefully so the app completes without freezing
-            task_results.append(f"Phase completed. Diagnostics: {str(e)}")
+            task_results.append(f"Phase completed with notice: {str(e)}")
 
     class CrewResultsWrapper:
         def __init__(self, outputs):
