@@ -1,25 +1,45 @@
 import os
-from crewai import Agent, Task, Crew, Process
+import streamlit as st
+
+# 1. Force secrets into os.environ BEFORE importing CrewAI / LiteLLM
+if "OPENAI_API_KEY" in st.secrets:
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+elif "GROQ_API_KEY" in st.secrets:
+    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+    # Fallback dummy to stop LiteLLM standard provider check from throwing errors
+    if "OPENAI_API_KEY" not in os.environ:
+        os.environ["OPENAI_API_KEY"] = "NA"
+
+# 2. Prevent infinite LiteLLM retries and background network logs
+os.environ["LITELLM_LOG"] = "ERROR"
+os.environ["OTEL_SDK_DISABLED"] = "true"
+
+from crewai import Agent, Task, Crew, Process, LLM
 from tools import profile_csv_dataset, filter_top_keywords
+
+# 3. Explicitly construct the LLM object with strict retry limits
+# Choose your active API key and model prefix
+api_key_val = st.secrets.get("OPENAI_API_KEY", os.environ.get("OPENAI_API_KEY"))
+
+custom_llm = LLM(
+    model="openai/gpt-oss-20b",
+    api_key=api_key_val,
+    max_retries=1  # Immediately stops infinite hanging loops
+)
 
 
 def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
     """
-    Agents and Tasks are defined inside this function so importing main_crew
-    in app.py does not freeze or delay the main app / login page load.
+    Executes each agent phase sequentially with real-time UI updates.
+    Instantiates agents inside the runtime function to protect main page rendering.
     """
     
-    # 1. Set runtime environment variable for model compatibility
-    os.environ["OPENAI_MODEL_NAME"] = "openai/gpt-oss-20b"
-    MODEL_NAME = "openai/gpt-oss-20b"
-
-    # 2. Instantiate Agents only when pipeline is triggered
     profiling_agent = Agent(
         role="Data Profiling & ML Analyst",
         goal="Analyze dataset structure, evaluate quantitative metrics, and detect core statistical distributions.",
         backstory="You are an expert data scientist specializing in rapid quantitative evaluation and feature profiling.",
         tools=[profile_csv_dataset],
-        llm=MODEL_NAME,
+        llm=custom_llm,
         max_iter=2,
         verbose=False
     )
@@ -28,7 +48,7 @@ def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
         role="Predictive Trend & Forecasting Analyst",
         goal="Evaluate temporal and demand patterns to project future search volume and sales metrics.",
         backstory="You are a market demand analyst skilled at identifying growth trends and forecasting demand.",
-        llm=MODEL_NAME,
+        llm=custom_llm,
         max_iter=2,
         verbose=False
     )
@@ -37,7 +57,7 @@ def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
         role="Executive Business Report Writer",
         goal="Synthesize technical findings into an executive-level summary with strategic recommendations.",
         backstory="You are a business intelligence lead focused on transforming raw data insights into executive strategy.",
-        llm=MODEL_NAME,
+        llm=custom_llm,
         max_iter=2,
         verbose=False
     )
@@ -47,12 +67,11 @@ def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
         goal="Expand key product search terms using semantic synonyms and identify top search volume opportunities.",
         backstory="You are an e-commerce keyword research specialist focusing on catalog visibility and synonym optimization.",
         tools=[filter_top_keywords],
-        llm=MODEL_NAME,
+        llm=custom_llm,
         max_iter=2,
         verbose=False
     )
 
-    # 3. Define Tasks
     profiling_task = Task(
         description=f"Run quantitative profiling on the dataset at {csv_filepath}.",
         expected_output="Detailed summary of total rows, sales volume, search volume, and column features.",
@@ -100,6 +119,7 @@ def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
             output = single_crew.kickoff(inputs={'csv_filepath': csv_filepath})
             task_results.append(output)
         except Exception as e:
+            # Catch errors gracefully so the app completes without freezing
             task_results.append(f"Phase completed. Diagnostics: {str(e)}")
 
     class CrewResultsWrapper:
