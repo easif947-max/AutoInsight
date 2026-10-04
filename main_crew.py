@@ -1,119 +1,48 @@
-import os
-import streamlit as st
+from crewai import Crew, Task, Process
+from agent_profiler import get_profiling_agent
+from agent_forecaster import get_forecasting_agent
+from agent_reporter import get_reporting_agent
+from agent_keyword import get_keyword_agent
 
-# 1. Map Groq API key directly from Streamlit Secrets to environment variables
-if "GROQ_API_KEY" in st.secrets:
-    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+def run_autoinsight_pipeline(csv_path: str, status_callback=None):
+    profiler = get_profiling_agent()
+    forecaster = get_forecasting_agent()
+    reporter = get_reporting_agent()
+    keyword_agent = get_keyword_agent()
 
-# Dummy fallback so LiteLLM doesn't complain about missing OpenAI credentials
-os.environ["OPENAI_API_KEY"] = os.environ.get("GROQ_API_KEY", "NA")
+    if status_callback:
+        status_callback("Phase 1/4: Running Data Profiling & ML Analysis Agent...")
 
-# Disable LiteLLM logging noise & telemetry
-os.environ["LITELLM_LOG"] = "ERROR"
-os.environ["OTEL_SDK_DISABLED"] = "true"
-
-from crewai import Agent, Task, Crew, Process
-from tools import profile_csv_dataset, filter_top_keywords
-
-# Explicitly prefix with 'groq/' so LiteLLM routes to Groq servers
-MODEL_NAME = "groq/openai/gpt-oss-20b"
-
-
-def run_autoinsight_pipeline(csv_filepath: str, status_callback=None):
-    """
-    Executes each agent phase sequentially with real-time UI updates.
-    Instantiates agents inside the runtime function to protect main page rendering.
-    """
-    
-    profiling_agent = Agent(
-        role="Data Profiling & ML Analyst",
-        goal="Analyze dataset structure, evaluate quantitative metrics, and detect core statistical distributions.",
-        backstory="You are an expert data scientist specializing in rapid quantitative evaluation and feature profiling.",
-        tools=[profile_csv_dataset],
-        llm=MODEL_NAME,
-        max_iter=2,
-        verbose=False
+    t1 = Task(
+        description=f"Run quantitative profiling on the dataset located at {csv_path}. Calculate total revenue, identify top products, and check correlations.",
+        expected_output="Detailed data profiling summary with total metrics and key trends.",
+        agent=profiler
     )
 
-    forecasting_agent = Agent(
-        role="Predictive Trend & Forecasting Analyst",
-        goal="Evaluate temporal and demand patterns to project future search volume and sales metrics.",
-        backstory="You are a market demand analyst skilled at identifying growth trends and forecasting demand.",
-        llm=MODEL_NAME,
-        max_iter=2,
-        verbose=False
+    t2 = Task(
+        description="Based on profiling results, generate a 3-month predictive forecast for units sold and search volume growth using slope trends.",
+        expected_output="3-Month forecasting report with explicit numerical projections.",
+        agent=forecaster
     )
 
-    report_agent = Agent(
-        role="Executive Business Report Writer",
-        goal="Synthesize technical findings into an executive-level summary with strategic recommendations.",
-        backstory="You are a business intelligence lead focused on transforming raw data insights into executive strategy.",
-        llm=MODEL_NAME,
-        max_iter=2,
-        verbose=False
+    t3 = Task(
+        description="Synthesize technical findings into an executive summary report with 3 key growth recommendations.",
+        expected_output="Executive business report formatted in Markdown.",
+        agent=reporter
     )
 
-    keyword_agent = Agent(
-        role="Semantic Keyword & Synonym Strategist",
-        goal="Expand key product search terms using semantic synonyms and identify top search volume opportunities.",
-        backstory="You are an e-commerce keyword research specialist focusing on catalog visibility and synonym optimization.",
-        tools=[filter_top_keywords],
-        llm=MODEL_NAME,
-        max_iter=2,
-        verbose=False
-    )
-
-    profiling_task = Task(
-        description=f"Run quantitative profiling on the dataset at {csv_filepath}.",
-        expected_output="Detailed summary of total rows, sales volume, search volume, and column features.",
-        agent=profiling_agent
-    )
-    
-    forecasting_task = Task(
-        description="Provide a 3-month trend projection based on keyword demand and search volume metrics.",
-        expected_output="Forecast summary outlining high-growth keywords and expected trend trajectories.",
-        agent=forecasting_agent
-    )
-    
-    report_task = Task(
-        description="Synthesize profiling and forecast results into a clean executive markdown report.",
-        expected_output="Structured business report containing key findings, data diagnostics, and recommendations.",
-        agent=report_agent
-    )
-    
-    keyword_task = Task(
-        description=f"Filter and expand high-value search terms for {csv_filepath} using semantic synonyms.",
-        expected_output="Ranked list of top keywords and matched synonyms with search volume figures.",
+    t4 = Task(
+        description=f"Run synonym expansion on the target terms in {csv_path} using tool `Keyword and Synonym Filter Engine` for keyword 'cat collar'. Output top converting terms.",
+        expected_output="Ranked table of expanded semantic keywords and search volume impact.",
         agent=keyword_agent
     )
 
-    pipeline_steps = [
-        ("⏳ Phase 1/4: Running Data Profiling & ML Analysis Agent...", profiling_task, profiling_agent),
-        ("⏳ Phase 2/4: Running Predictive Forecasting Agent...", forecasting_task, forecasting_agent),
-        ("⏳ Phase 3/4: Generating Executive Business Report...", report_task, report_agent),
-        ("⏳ Phase 4/4: Running Keyword & Synonym Expansion Engine...", keyword_task, keyword_agent)
-    ]
-    
-    task_results = []
-    
-    for phase_msg, task, agent in pipeline_steps:
-        if status_callback:
-            status_callback(phase_msg)
-            
-        try:
-            single_crew = Crew(
-                agents=[agent],
-                tasks=[task],
-                process=Process.sequential,
-                verbose=False
-            )
-            output = single_crew.kickoff(inputs={'csv_filepath': csv_filepath})
-            task_results.append(output)
-        except Exception as e:
-            task_results.append(f"Phase completed with notice: {str(e)}")
+    crew = Crew(
+        agents=[profiler, forecaster, reporter, keyword_agent],
+        tasks=[t1, t2, t3, t4],
+        process=Process.sequential,
+        verbose=True
+    )
 
-    class CrewResultsWrapper:
-        def __init__(self, outputs):
-            self.tasks_output = outputs
-
-    return CrewResultsWrapper(task_results)
+    results = crew.kickoff()
+    return results
